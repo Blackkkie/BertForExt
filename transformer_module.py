@@ -292,16 +292,16 @@ class Classifier(nn.Module):
         self.linear1 = nn.Linear(hidden_size, 1)
         self.sigmoid = nn.Sigmoid()
 
-    def forward(self, x, mask_cls):
+    def forward(self, x):
         h = self.linear1(x).squeeze(-1)
-        sent_scores = self.sigmoid(h) * mask_cls.float()
+        sent_scores = self.sigmoid(h)
         return sent_scores
 
 
 # 位置编码
 class PositionalEncoding(nn.Module):
 
-    def __init__(self, dropout, dim, max_len=100):
+    def __init__(self, dropout, dim, max_len=256):
 
         pe = torch.zeros((max_len, dim))
         position = torch.arange(0, max_len).unsqueeze(1)
