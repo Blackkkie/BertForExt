@@ -74,17 +74,17 @@ class Trainer:
         # 防止不够config.batch_size的情况发生
         batch_size = len(src)
 
-        # 获取src_sent_lens(每句话的长度),tgt_lens(每篇文档的句子数),src_lens(每篇文档的总长度)
-        src_sent_lens, tgt_lens = [[len(s) for s in src[b]] for b in range(batch_size)], [len(t) for t in tgt]
-        src_lens = [sum(src_sent_lens[b]) for b in range(batch_size)]
+        # 获取src_sent_lens(每句话的长度),src_sent_num(每篇文档的句子数),src_lens(每篇文档的总长度)
+        src_sent_lens = [[len(s) for s in src[b]] for b in range(batch_size)]
+        src_sent_num = [len(d) for d in src_sent_lens]
+        src_lens = [sum(d) for d in src_sent_lens]
 
         # 得到一个batch内的最大文章长度和最大句子个数
         src_max_len = max(src_lens)
-        tgt_max_len = max(tgt_lens)
+        tgt_max_len = max(src_sent_num)
 
         # 输入编码，标签编码，句子编码，输入mask
         inputs = torch.zeros((batch_size, src_max_len), dtype=torch.int64)
-
         labels = torch.zeros((batch_size, tgt_max_len))
 
         segments = torch.zeros((batch_size, src_max_len), dtype=torch.int64)
@@ -102,6 +102,8 @@ class Trainer:
             cls_index = []
 
             # 对于第i个batch中的每一句话
+            # 用以生成segments和赋值
+            # src_sent_lens[i][j]表示第i篇文档的第j句话的长度
             for j in range(len(src[i])):
 
                 inputs[i, seg_h:seg_h+src_sent_lens[i][j]] = torch.LongTensor(src[i][j])
@@ -117,9 +119,8 @@ class Trainer:
             segments[i, seg_h:] = next_embed
 
             inputs_mask[i, :src_lens[i]] = True
-            cls_mask[:tgt_lens[i]] = True
-
-            labels[i, :tgt_lens[i]] = torch.Tensor(tgt[i])
+            cls_mask[i, :src_sent_num[i]] = True
+            labels[i, :src_sent_num[i]] = torch.Tensor(tgt[i])
 
         return inputs, inputs_mask, segments, labels, cls_indices, cls_mask
 
@@ -132,7 +133,7 @@ class Trainer:
         # 获取src_sent_lens(每句话的长度),src_sent_num(每篇文档的句子数),src_lens(每篇文档的总长度)
         src_sent_lens = [[len(s) for s in src[b]] for b in range(batch_size)]
         src_sent_num = [len(d) for d in src_sent_lens]
-        src_lens = [sum(src_sent_lens[b]) for b in range(batch_size)]
+        src_lens = [sum(d) for d in src_sent_lens]
 
         # 得到一个batch内的最大文章长度和最大句子个数
         src_max_len = max(src_lens)
@@ -170,7 +171,7 @@ class Trainer:
             segments[i, seg_h:] = next_embed
 
             inputs_mask[i, :src_lens[i]] = True
-            cls_mask[:src_sent_num[i]] = True
+            cls_mask[i, :src_sent_num[i]] = True
 
         return inputs, inputs_mask, segments, cls_indices, cls_mask
 
@@ -201,9 +202,6 @@ class Trainer:
 
                 inputs, inputs_mask, segments, labels, cls_indices, cls_mask = self.list2tensor(*batch)
 
-                if step < 200:
-                    continue
-
                 loss = self.model(inputs.to(config.device),
                                   segments.to(config.device),
                                   cls_indices,
@@ -214,8 +212,8 @@ class Trainer:
                 loss = loss.mean()
                 loss.backward()
 
-                记录四个loss
-                with open('loss_c_%s.txt' % vision, 'a+', encoding="UTF-8") as file:
+                # 记录四个loss
+                with open('loss_%s.txt' % vision, 'a+', encoding="UTF-8") as file:
                     file.write(str(loss.item()) + '\n')
 
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
@@ -236,15 +234,15 @@ class Trainer:
     def eval_model(self):
         self.model.eval()
 
-        src_path = './data/ssplit_test_src.json'
+        src_path = './data/process_src_ids_test(new).txt'
 
-        self.test_loader = get_dataloader(src_path, None, self.tokenizer, shuffle=False, batch_size=16)  # 处理成多个batch的形式
+        self.test_loader = get_dataloader(src_path, None, shuffle=False, batch_size=16)  # 处理成多个batch的形式
 
         with torch.no_grad():
             bar = tqdm(range(len(self.test_loader)))
             for step, batch in zip(bar, self.test_loader):
 
-                inputs, inputs_mask, segments, cls_indices, cls_mask = self.list2tensor_test(*batch)
+                inputs, inputs_mask, segments, cls_indices, cls_mask = self.list2tensor_test(batch)
 
                 logits = self.model(inputs.to(config.device),
                                     segments.to(config.device),
@@ -252,20 +250,20 @@ class Trainer:
                                     inputs_mask.to(config.device),
                                     cls_mask.to(config.device))
 
+
                 # 输出前k句的
-                output_sentences_indices = logits.argmax(dim=-1)[:, :config.topk].tolist()
+                output_sentences_indices = logits.topk(k=config.topk, dim=-1, largest=True).indices.tolist()
 
-                with open('./res_sent_indices.txt', 'a', encoding='utf-8') as file:
+                with open('./res_sent_indices_v6.txt', 'a', encoding='utf-8') as file:
                     for ids in output_sentences_indices:
-                        file.write(json.dumps(ids)+'\n')
-
-
+                        sorted_ids = list(sorted(ids))
+                        file.write(json.dumps(sorted_ids)+'\n')
 
 def parse_config():
     parser = argparse.ArgumentParser()
     parser.add_argument('--train', type=bool, default=True)
     parser.add_argument('--eval', type=bool, default=False)
-    parser.add_argument('--model_path', type=str, default='./model_save/checkpoint_v1_1')
+    parser.add_argument('--model_path', type=str, default='./model_save/checkpoint_v6_1')
     return parser.parse_args()
 
 
