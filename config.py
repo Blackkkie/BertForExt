@@ -8,11 +8,14 @@ model_type = "ExtBert"
 
 topk = 3
 
-batch_size = 16
+batch_size = 4
 lr = 1e-3
 epochs = 100
+min_true_nlabels = 1
 max_sent_len = 50
 max_src_nsents = 20
+min_src_nsents = 3
+min_src_ntokens_per_sent = 5
 
 # Bert配置
 attention_probs_dropout_prob = 0.1
