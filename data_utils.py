@@ -29,6 +29,9 @@ def collate_fn(batch):
     batch = list(zip(*batch))
     return batch[0], batch[1]
 
+def collate_fn_test(batch):
+    return batch
+
 
 class SummaryDataset(Dataset):
     def __init__(self, src, tgt):
@@ -85,11 +88,9 @@ def get_test_text(src_path):
 
     with open(src_path, 'r', encoding='utf-8') as file:
 
-        bar = tqdm(file.readlines(), '读取原文文本：')
+        bar = tqdm(file.readlines(), '读取测试文本：')
         for line in bar:
-            sentence = turn2sent(json.loads(line.strip()))
-            tail = min(len(sentence), config.max_enc_steps)
-            src.append(' '.join(sentence[:tail]))
+            src.append(json.loads(line.strip()))
 
     return src
 
@@ -106,7 +107,7 @@ def get_dataloader(src_path, tgt_path, batch_size, shuffle=True):
     else:
         src = get_test_text(src_path)
         dataset = TestDataset(src)
-        test_dataloader = DataLoader(dataset, shuffle=shuffle, batch_size=batch_size)
+        test_dataloader = DataLoader(dataset, shuffle=shuffle, batch_size=batch_size, collate_fn=collate_fn_test)
         return test_dataloader
 
 
