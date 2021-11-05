@@ -78,14 +78,37 @@ class Bert(nn.Module):
         return top_vec
 
 
+# 将softmax应用至
+def MultiLabelSoftmaxLoss(inputs, targets, mask):
+    # 将inputs中负例分数保持不变，正例分数变为相反数(乘上-1)
+    y_pred = (1 - 2 * targets) * inputs
+
+    # 将没意义的位置变成一个很小的值
+    y_pred_neg = y_pred - targets * mask * 1e12
+    y_pred_pos = y_pred - (1 - targets) * mask * 1e12
+
+    zeros = torch.zeros_like(y_pred[..., :1])
+
+    y_pred_neg = torch.cat([y_pred_neg, zeros], dim=-1)
+    y_pred_pos = torch.cat([y_pred_pos, zeros], dim=-1)
+
+    neg_loss = torch.logsumexp(y_pred_neg, dim=-1)
+    pos_loss = torch.logsumexp(y_pred_pos, dim=-1)
+
+    return torch.mean(neg_loss + pos_loss)
+
+
+
 class ExtSummarizer(nn.Module):
     def __init__(self, checkpoint=None):
         super(ExtSummarizer, self).__init__()
 
         self.bert = BertModel.from_pretrained('./bert-base-uncased')
 
-        self.ext_layer = ExtTransformerEncoder(config.hidden_size, config.ext_ff_size, config.ext_heads,
-                                               config.ext_dropout, config.ext_layers)
+        # self.ext_layer = ExtTransformerEncoder(config.hidden_size, config.ext_ff_size, config.ext_heads,
+        #                                        config.ext_dropout, config.ext_layers)
+
+        self.ext_layer = Classifier(config.hidden_size)
 
         self.loss_func = nn.BCELoss(reduction='none')
 
@@ -131,23 +154,27 @@ class ExtSummarizer(nn.Module):
         # clss为每一个CLS的索引
         batch_size, _, hidden_size = top_vec.size()
 
-        sent_num = [len(d) for d in clss]
-        max_sent_num = max(sent_num)
+        max_sent_num = mask_cls.size()[1]
 
         sents_vec = torch.zeros((batch_size, max_sent_num, hidden_size)).to(config.device)
 
         # sents_vec = top_vec[torch.arange(top_vec.size(0)).unsqueeze(1), clss]
         # sents_vec = sents_vec * mask_cls[:, :, None].float()
 
+        # 对于每一篇文档，取
         for i in range(batch_size):
             for j in range(len(clss[i])):
                 sents_vec[i, j] = top_vec[i, clss[i][j]]
 
-        sent_scores = self.ext_layer(sents_vec, mask_cls).squeeze(-1)
+        # sent_scores = self.ext_layer(sents_vec, mask_cls).squeeze(-1)
+        sent_scores = self.ext_layer(sents_vec).squeeze(-1)
 
+        # 需要设置一个权重求和
         if labels is not None:
+
             loss = self.loss_func(sent_scores, labels)
-            loss = torch.sum(loss * mask_cls) / torch.sum(mask_cls)
+            loss = torch.sum(loss * mask_cls) / mask_cls.sum()
+
             return loss
         else:
             return sent_scores
